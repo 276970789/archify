@@ -113,7 +113,10 @@ function rendererFailure(error) {
 export function installRendererDiagnosticBoundary() {
   if (!DIAGNOSTIC_MODE || globalThis[boundaryKey]) return;
   globalThis[boundaryKey] = true;
+  let fatalWritePending = false;
   process.on('uncaughtException', (error) => {
+    if (fatalWritePending) return;
+    fatalWritePending = true;
     const payload = `${JSON.stringify(rendererFailure(error))}\n`;
     // A single writeSync can write only a prefix to a pipe. Let the stream
     // flush the entire failure before terminating, even with active handles.

@@ -121,6 +121,47 @@ test('compare keeps the actual renderer rule and preserves the existing output p
   assert.deepEqual(fs.readdirSync(tmp).filter((name) => name.startsWith('.archify-compare-')), []);
 });
 
+test('concurrent fatal errors emit only the first complete diagnostic under backpressure', async () => {
+  const boundaryUrl = pathToFileURL(path.join(skillRoot, 'renderers/shared/diagnostics.mjs')).href;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import { installRendererDiagnosticBoundary } from ${JSON.stringify(boundaryUrl)};
+    installRendererDiagnosticBoundary();
+    setImmediate(() => { throw new Error('first failure ' + 'x'.repeat(256 * 1024)); });
+    setImmediate(() => {
+      process.send({ backpressured: process.stderr.writableLength > 0 });
+      throw new Error('second failure');
+    });
+  `], {
+    env: { ...process.env, ARCHIFY_DIAGNOSTIC_FORMAT: 'json' },
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+    timeout: 10_000,
+  });
+  // Hold the pipe until the second exception is scheduled during the first
+  // write. IPC makes this independent of timer timing and reader throughput.
+  const chunks = [];
+  let backpressured = false;
+  child.once('message', (message) => {
+    backpressured = message.backpressured;
+    child.stderr.on('data', (chunk) => chunks.push(chunk));
+  });
+  const result = await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code, signal) => resolve({ code, signal }));
+  });
+  assert.deepEqual(result, { code: 1, signal: null });
+  assert.equal(backpressured, true, 'the second exception must occur while stderr is pending');
+  let failure;
+  try {
+    failure = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    assert.fail('stderr must contain exactly one complete JSON failure');
+  }
+  assert.equal(failure.ok, false);
+  assert.equal(failure.error, 'first failure ' + 'x'.repeat(256 * 1024));
+  assert.equal(failure.diagnostics.length, 1);
+  assert.equal(failure.diagnostics[0].message, failure.error);
+});
+
 test('renderer boundary still terminates when the stderr reader has closed', async () => {
   const boundaryUrl = pathToFileURL(path.join(skillRoot, 'renderers/shared/diagnostics.mjs')).href;
   const child = spawn(process.execPath, ['--input-type=module', '-e', `
