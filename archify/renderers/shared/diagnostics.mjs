@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 
 const DIAGNOSTIC_MODE = process.env.ARCHIFY_DIAGNOSTIC_FORMAT === 'json';
@@ -116,12 +115,15 @@ export function installRendererDiagnosticBoundary() {
   globalThis[boundaryKey] = true;
   process.on('uncaughtException', (error) => {
     const payload = `${JSON.stringify(rendererFailure(error))}\n`;
+    // A single writeSync can write only a prefix to a pipe. Let the stream
+    // flush the entire failure before terminating, even with active handles.
+    process.stderr.once('error', () => process.exit(1));
     try {
-      fs.writeSync(process.stderr.fd, payload);
+      process.stderr.write(payload, () => process.exit(1));
     } catch {
       // The renderer is already failing. Avoid replacing its real error with a
       // secondary stream failure; the parent CLI still has the exit status.
+      process.exit(1);
     }
-    process.exit(1);
   });
 }
