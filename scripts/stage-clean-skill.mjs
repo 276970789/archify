@@ -207,8 +207,7 @@ function validateThirdPartyNoticeInputs(repoRoot, packageEntries) {
     throw new Error('repository THIRD_PARTY_NOTICES.md is missing or unreadable');
   }
 
-  const template = packageEntries.find((entry) => entry.relative === 'archify/assets/template.html');
-  const embeddedFonts = /data:font\/woff2/.test(template?.content.toString('utf8') || '');
+  const embeddedFonts = packageEntries.some((entry) => entry.content.includes('data:font/woff2'));
   if (embeddedFonts && !packageEntries.some((entry) => entry.relative === 'archify/assets/JetBrainsMono-OFL.txt')) {
     throw new Error('embedded viewer font requires assets/JetBrainsMono-OFL.txt');
   }
